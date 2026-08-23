@@ -18,6 +18,7 @@ Type your message and press Enter. Type 'quit' (or Ctrl-C) to exit.
 
 import argparse
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -25,6 +26,19 @@ from pathlib import Path
 import boto3
 from botocore.config import Config
 from botocore.eventstream import EventStream
+
+
+THINKING_RE = re.compile(r"<thinking>.*?</thinking>\s*", re.DOTALL | re.IGNORECASE)
+
+
+def strip_thinking(text):
+    """Remove Nova's visible reasoning blocks from a reply."""
+    text = THINKING_RE.sub("", text)
+    # An unclosed block (truncated stream): drop from the tag onward.
+    idx = text.lower().find("<thinking>")
+    if idx != -1:
+        text = text[:idx]
+    return text.strip()
 
 
 def event_stream(response):
@@ -68,16 +82,22 @@ def invoke(rt, config, session_id, user_text, verbose=False):
         elif "contentBlockDelta" in event:
             delta = event["contentBlockDelta"].get("delta", {})
             if "text" in delta:
-                print(delta["text"], end="", flush=True)
                 buffer.append(delta["text"])
         elif "messageStop" in event:
             if buffer:
-                texts.append("".join(buffer))
+                message = "".join(buffer)
+                texts.append(message)
+                visible = strip_thinking(message)
+                if visible:
+                    print(visible, flush=True)
                 buffer = []
     if buffer:
-        texts.append("".join(buffer))
-    print()
-    return texts[-1] if texts else ""
+        message = "".join(buffer)
+        texts.append(message)
+        visible = strip_thinking(message)
+        if visible:
+            print(visible, flush=True)
+    return strip_thinking(texts[-1]) if texts else ""
 
 
 def main():

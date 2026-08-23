@@ -15,6 +15,7 @@ Evaluations expects:
 
 import argparse
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -23,6 +24,19 @@ from typing import Any, Dict
 import boto3
 from botocore.config import Config
 from botocore.eventstream import EventStream
+
+
+THINKING_RE = re.compile(r"<thinking>.*?</thinking>\s*", re.DOTALL | re.IGNORECASE)
+
+
+def strip_thinking(text):
+    """Remove Nova's visible reasoning blocks from a reply."""
+    text = THINKING_RE.sub("", text)
+    # An unclosed block (truncated stream): drop from the tag onward.
+    idx = text.lower().find("<thinking>")
+    if idx != -1:
+        text = text[:idx]
+    return text.strip()
 
 
 def _event_stream(response):
@@ -80,7 +94,7 @@ def invoke_harness_once(
     if buffer:
         texts.append("".join(buffer))
 
-    return {"final_output_text": texts[-1] if texts else ""}
+    return {"final_output_text": strip_thinking(texts[-1]) if texts else ""}
 
 
 def main():
