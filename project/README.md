@@ -244,4 +244,4 @@ aws cloudformation delete-stack --stack-name bug-report-testing-stack --region u
 aws cloudformation delete-stack --stack-name bug-report-tool-stack --region us-east-1
 ```
 
-The S3 bucket must be emptied before its stack will delete.
+
