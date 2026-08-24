@@ -158,16 +158,60 @@ memory is disabled):
 
 ## Evaluation observations
 
-<!-- Fill in from the Bedrock Evaluations results page. -->
+Job `support-chatbot-eval-1787527623` (`evaluation-job/vrpe1t5zypuk`) · Judge
+`amazon.nova-pro-v1:0` · Metric `Builtin.Correctness` · 9 records,
+bring-your-own-inference.
 
-Job: `support-chatbot-eval-…` (`evaluation-job/…`) · Judge: `amazon.nova-pro-v1:0`
-Metric: `Builtin.Correctness` · Dataset: 9 records, bring-your-own-inference.
+**Mean correctness: 1.000 (9/9)**
 
-**Correctness score: `<score>`**
+| # | Case | Score |
+|---|---|---|
+| 1 | bug-01-complete-report | 1.0 |
+| 2 | bug-02-missing-details | 1.0 |
+| 3 | bug-03-missing-environment | 1.0 |
+| 4 | faq-01-return-policy | 1.0 |
+| 5 | faq-02-refund-timing | 1.0 |
+| 6 | faq-03-guest-checkout | 1.0 |
+| 7 | other-01-out-of-scope-request | 1.0 |
+| 8 | other-02-not-in-faq | 1.0 |
+| 9 | other-03-human-agent | 1.0 |
 
-1. `<Which routes scored highest, and why.>`
-2. `<Any case marked down, and whether the fault lay with the prompt, the reference response, or judge strictness.>`
-3. `<What the score would have been before v6 — the three placeholder tickets are the counterfactual.>`
+Observations:
+
+1. **All three routes scored equally.** The FAQ and hand-off cases (4-9) are the
+   easy half: the reference response and the FAQ text overlap heavily, so a
+   grounded answer scores well almost by construction. The bug cases (1-3) are the
+   ones that carry information, because each is a regression test for a defect that
+   actually occurred — `bug-02` for the v1 premature tool call, `bug-03` for the v5
+   file-then-ask hybrid, and `bug-01` guarding against over-correcting into never
+   calling the tool at all.
+
+2. **Nothing was marked down, and that is worth being sceptical about.** The judge's
+   own explanation for case 1 shows it reasoning around a gap rather than
+   penalising it: the reply was `"Ticket <uuid> has been filed. The engineering team
+   will follow up."`, and the judge noted it *"does not explicitly confirm that the
+   bug report has been filed"* but accepted the ticket ID as implying it. That is a
+   defensible call, but it shows the metric rewards semantic overlap with the
+   reference rather than strict compliance — a 1.000 here means "no contradictions",
+   not "no room to improve". The judge also shares a model family with the system
+   under test, so shared blind spots are plausible.
+
+3. **The score is a poor discriminator; the datastore is the real one.** Earlier
+   prompt versions would have scored well on this metric while filing junk. v3
+   produced `"8b655540-0d89-447f-8a16-0a029a93584c"` — a correctly formatted UUID
+   with no DynamoDB row behind it — which reads as a perfectly good ticket
+   confirmation to a text-only judge. Likewise the v1 and v5 placeholder tickets
+   (`environment: "not provided"`) would have satisfied case 1's reference response.
+   The defects were caught by scanning DynamoDB and CloudWatch, not by the
+   evaluation. An LLM-as-a-judge run over transcripts cannot see whether a side
+   effect occurred, so it belongs alongside datastore assertions, not instead of
+   them.
+
+4. **Coverage, not score, is the honest next step.** Nine single-turn cases with a
+   perfect result mean the suite is no longer discriminating. What it does not cover:
+   multi-turn collection (verified only manually), a customer who refuses to answer,
+   two bugs in one conversation, a tool-failure path, and injection attempts beyond
+   the single "ignore your instructions" phrasing tried by hand.
 
 ## Known limitations
 
