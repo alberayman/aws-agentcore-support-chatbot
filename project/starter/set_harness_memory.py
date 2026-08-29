@@ -45,7 +45,7 @@ def wait_ready(acc, harness_id, timeout=300):
         status, version, memory = describe(acc, harness_id)
         if status == "READY":
             return status, version, memory
-        if status in ("FAILED", "DELETING"):
+        if "FAILED" in (status or "") or status == "DELETING":
             sys.exit(f"Harness entered status {status}.")
         print(f"  status: {status} — waiting...")
         time.sleep(10)

@@ -1,0 +1,49 @@
+{
+  "tests": [
+    {
+      "id": "bug-01-complete-report",
+      "prompt": "The checkout page crashes when I click the Pay button. To reproduce: add any item to the cart, go to checkout, click Pay, and the page goes blank. I'm on Chrome 128 on macOS Sonoma.",
+      "expected": "Confirms the bug report has been filed, states the ticket ID returned by the create_bug_report tool, and says the engineering team will follow up. Does not ask for any further details, because the description, the steps to reproduce, and the environment were all supplied."
+    },
+    {
+      "id": "bug-02-missing-details",
+      "prompt": "Your website is broken.",
+      "expected": "Acknowledges the problem and asks one single follow-up question about what exactly is broken (the description). Does not file a ticket, does not provide a ticket ID, and does not ask for several pieces of information at once."
+    },
+    {
+      "id": "bug-03-missing-environment",
+      "prompt": "The order tracking page never loads. I sign in, click My Orders, and it just spins forever.",
+      "expected": "Asks one follow-up question for the customer's environment (browser, operating system, or device), since the description and the steps to reproduce were already given. Does not file a ticket yet and does not re-ask for the description or the steps."
+    },
+    {
+      "id": "faq-01-return-policy",
+      "prompt": "What is your return policy?",
+      "expected": "Answers from the FAQ: most items can be returned within 30 days of delivery provided they are unused and in their original packaging, unless the item arrived defective. Does not file a bug report and does not refer the customer to the phone line."
+    },
+    {
+      "id": "faq-02-refund-timing",
+      "prompt": "How long until I get my refund after sending an item back?",
+      "expected": "Answers from the FAQ: refunds go back to the original payment method after the return is received and inspected, and typically take 3 to 10 business days depending on the bank or provider."
+    },
+    {
+      "id": "faq-03-guest-checkout",
+      "prompt": "Do I have to create an account to buy something?",
+      "expected": "Answers from the FAQ: no, guest checkout is available, and an account additionally allows order tracking, saved addresses, and faster future checkouts."
+    },
+    {
+      "id": "other-01-out-of-scope-request",
+      "prompt": "Can you write me a Python script that scrapes your product prices?",
+      "expected": "Politely declines because this is not something it can help with here, and refers the customer to the human support line at 1-800-555-0199, available Monday to Friday. Does not provide any code and does not file a bug report."
+    },
+    {
+      "id": "other-02-not-in-faq",
+      "prompt": "Do you offer a student discount, and what percentage is it?",
+      "expected": "Does not invent a discount policy. Because the FAQ does not cover student discounts, it politely hands off to the human support line at 1-800-555-0199, available Monday to Friday."
+    },
+    {
+      "id": "other-03-human-agent",
+      "prompt": "I want to speak to a real person right now.",
+      "expected": "Politely refers the customer to the human support line at 1-800-555-0199, available Monday to Friday. Does not attempt to answer a product question and does not file a bug report."
+    }
+  ]
+}

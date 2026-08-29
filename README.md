@@ -8,6 +8,24 @@ separate classifier.
 Model: `us.amazon.nova-pro-v1:0`, greedy decoding (temperature 0, topK 1).
 Region: `us-east-1`. Account type: AWS Academy Learner Lab (`voclabs`).
 
+## Reviewer note — AgentCore harness, not Bedrock Flows
+
+The project rubric page predates the AgentCore migration and uses Bedrock Flows
+terminology. Bedrock Agents Classic was closed to new customers on 2026-07-30 and
+the current Instructions page specifies the AgentCore managed harness, so this
+project is built on AgentCore with prompt-based routing. Mapping:
+
+| Rubric term | Where it lives here |
+|---|---|
+| classifier node | STEP 1 of `project/starter/system_prompt.txt` |
+| Condition node expressions | the category branches in STEP 2 of the same file |
+| Output nodes | the three reply behaviours: ticket confirmation, FAQ answer, phone hand-off |
+| `flow-tests.json` | `project/starter/harness-tests.json` (identical copy also committed as `flow-tests.json`) |
+| flow test responses | `docs/TRANSCRIPTS.md` plus the screenshots in `docs/` |
+
+Evidence for every rubric criterion is listed in **Evidence map** at the end of
+this document.
+
 ## Architecture
 
 ```
@@ -41,10 +59,9 @@ export PY=/workspace/.venv-agentcore/bin/python
 aws cloudformation deploy --template-file cloudformation-tool.yaml \
   --stack-name bug-report-tool-stack --capabilities CAPABILITY_NAMED_IAM --region us-east-1
 $PY setup_gateway.py            # gateway + tool target -> agentcore_config.json
-$PY create_harness.py           # harness from system_prompt.txt
-$PY set_harness_memory.py --mode disabled    # see Finding 3
-$PY patch_thinking.py           # see Finding 2
-$PY chat.py                     # manual multi-turn testing
+$PY patch_thinking.py           # hide the model's working notes (Findings 2, 6)
+$PY create_harness.py --name support_chatbot_v9   # keep managed memory (Finding 3)
+$PY chat.py                     # bug report FIRST on a new harness (Finding 8)
 
 $PY generate-eval-dataset.py --tests-json harness-tests.json
 aws cloudformation deploy --template-file cloudformation-testing.yaml \
@@ -114,13 +131,28 @@ commits to a `toolUse` block. Presentation was therefore moved to the client
 the reasoning channel exists and is hidden, the prompt makes the model write its
 fact audit *there*, where the decision is actually made.
 
-**3. Managed memory breaks test isolation.** AgentCore attaches a managed memory
-resource by default. It persists across `runtimeSessionId`, so a "fresh" session
-recalled a previous conversation and re-served its ticket ID instead of filing a new
-one. `generate-eval-dataset.py`'s claim that a new session per test case "keeps every
-test independent" is therefore false out of the box — eval scores would carry
-test-order effects. Disabling memory fixed the isolation, and multi-turn collection
-still works, so within-session state is independent of the memory resource.
+**3. AgentCore's memory setting is one switch across two independent concerns.**
+A harness gets a managed memory resource by default, and the only controls are
+`managed`, `disabled`, or a hand-rolled `agentCoreMemoryConfiguration`. Measured
+behaviour of the two simple settings:
+
+| `memory` | Multi-turn collection within a session | Isolation between sessions |
+|---|---|---|
+| `managed` | works | **leaks** — a new `runtimeSessionId` still recalls earlier conversations |
+| `disabled` | **broken** — every turn arrives as a fresh conversation | works |
+
+Neither is both. With `disabled`, the assistant asks no follow-up questions
+because it cannot see what it already asked; it filed three separate tickets for
+one three-turn bug report. With `managed`, a "fresh" session recalled a previous
+ticket and re-served its ID instead of filing a new one — and in the starkest
+example, a promo-code bug report came back with advice about student discounts
+carried over from an unrelated earlier conversation.
+
+This also falsifies `generate-eval-dataset.py`'s comment that a new session per
+test case "keeps every test independent": with the default settings it does not.
+The production answer is per-customer `actorId` scoping via
+`agentCoreMemoryConfiguration`; the demo answer is a harness whose memory has
+never seen a bug report.
 
 **4. A transcript is not evidence that a ticket exists.** Two separate failure modes
 produced convincing replies with nothing in the database, one of them a correctly
@@ -138,11 +170,42 @@ foundation model and needs its own ARN in the policy. Worked around by judging w
 base model id `amazon.nova-pro-v1:0`; the correct fix is to add an
 `inference-profile/*` resource to the role in `cloudformation-testing.yaml`.
 
-**6. The model will satisfy a required parameter rather than ask for it.** Three
-different prompt clauses across v1, v4 and v5 each produced a ticket with a fabricated
-or placeholder field. This is why the Lambda validates the three fields server-side and
-returns an error instead of writing an incomplete row — a required field cannot be
-defended in the prompt alone.
+**6. The model will satisfy a required parameter rather than ask for it.** Four
+separate occasions produced a ticket whose fields the customer never supplied, each
+with different filler: `"User reported a bug but did not specify what is broken."`
+(v1), `"not provided"` (v4 and v5), a correctly formatted but non-existent UUID (v3),
+and — most tellingly — the literal string `"MISSING"`, lifted straight out of the
+audit template the prompt itself defines. The Lambda rejects empty strings, but
+`"MISSING"` is not empty, so it was written to DynamoDB. A required field cannot be
+defended in the prompt alone; the validation belongs in the tool, and it should reject
+placeholder tokens as well as empty ones.
+
+**7. Prompt edits have non-local effects.** Rewriting four lines of the OTHER
+branch — to force the support phone number into every hand-off — broke the
+*bug-report* branch, which the edit never touched: on a virgin harness the
+assistant began filing a ticket on every turn again. Reverting those four lines
+restored correct behaviour with nothing else changed. With `temperature 0` and
+`topK 1` the model is near-deterministic, so this is not sampling noise; a long
+system prompt behaves as one object, and a local edit can shift attention
+elsewhere in it. Practical consequence: every prompt change needs the *whole*
+regression suite re-run, not just the case it was aimed at.
+
+**8. A bug-report demo needs a harness whose memory has never seen a bug report.**
+Following from Finding 3: once one completed bug report is in the managed memory,
+every later conversation inherits it and the fact-collection gate short-circuits.
+Recording the transcripts therefore required creating a fresh harness and making
+the bug report its first-ever conversation. The transcripts in `docs/` were
+captured in that order.
+
+**9. `cleanup_agentcore.py` leaks the memory resource, and the name stays
+reserved.** The script deletes the harness, gateway target and gateway, but not
+the managed memory the harness created. Rebuilding after a teardown then fails
+with `CREATE_FAILED` and `Memory with name support_chatbot already exists` —
+a message that never surfaces through the script, which polls a dead harness
+until it times out. Worse, deleting the orphan is not enough: the name stays
+reserved after the resource disappears from `list_memories`, so a rebuild has to
+use a different harness name. `create_harness.py` was patched to exit on any
+`*_FAILED` status and print `failureReason` instead of polling blindly.
 
 ## Test suite
 
@@ -178,9 +241,9 @@ bring-your-own-inference.
 
 Observations:
 
-1. **All three routes scored equally.** The FAQ and hand-off cases (4-9) are the
+1. **All three routes scored equally.** The FAQ and hand-off cases (4–9) are the
    easy half: the reference response and the FAQ text overlap heavily, so a
-   grounded answer scores well almost by construction. The bug cases (1-3) are the
+   grounded answer scores well almost by construction. The bug cases (1–3) are the
    ones that carry information, because each is a regression test for a defect that
    actually occurred — `bug-02` for the v1 premature tool call, `bug-03` for the v5
    file-then-ask hybrid, and `bug-01` guarding against over-correcting into never
@@ -230,10 +293,12 @@ Observations:
 
 | Rubric criterion | Evidence |
 |---|---|
-| Classification and routing | `system_prompt.txt` STEP 1; transcripts covering all three routes, including a prompt-injection attempt handled as OTHER |
-| Bug report path | `chat.py` transcript with per-turn questions and `[tool call] bugreports___create_bug_report`; DynamoDB row `97ee179f-…` matching that transcript |
-| Platform question / other | Transcripts of a covered question, an uncovered in-topic question (student discount), and an out-of-scope request |
-| Testing and evaluation | `harness-tests.json`, `output_eval_dataset.jsonl`, Evaluations results screenshot, and the observations above |
+| Classification and routing | STEP 1 of `system_prompt.txt`; all three routes demonstrated in `docs/TRANSCRIPTS.md` sections 1-4 |
+| Bug report path | `docs/TRANSCRIPTS.md` §1 and `docs/bug-report-transcript.png` — a follow-up question for the missing environment, then `[tool call] bugreports___create_bug_report`; ticket `726ace4d-4933-4140-ad92-0127e57f2c61` in `docs/dynamodb-table.png` |
+| Platform question path | `docs/TRANSCRIPTS.md` §2 and `docs/faq-covered-transcript.png` — three answers grounded in the FAQ |
+| Other request path | `docs/TRANSCRIPTS.md` §3-4, `docs/faq-uncovered-handoff.png` and `docs/other-request-handoff.png` — both hand off to 1-800-555-0199 |
+| Testing and evaluation | `harness-tests.json` (copy: `flow-tests.json`), `output_eval_dataset.jsonl`, `docs/eval-results.png` (Correctness 1.00 over 9 records), observations above |
+| Stand-out: injection resistance | `docs/TRANSCRIPTS.md` §5 and `docs/prompt-injection-handoff.png` |
 
 ## Cleanup
 
@@ -244,3 +309,4 @@ aws cloudformation delete-stack --stack-name bug-report-testing-stack --region u
 aws cloudformation delete-stack --stack-name bug-report-tool-stack --region us-east-1
 ```
 
+The S3 bucket must be emptied before its stack will delete.

@@ -29,16 +29,25 @@ from botocore.eventstream import EventStream
 
 
 THINKING_RE = re.compile(r"<thinking>.*?</thinking>\s*", re.DOTALL | re.IGNORECASE)
+# The system prompt asks the model to audit the three bug-report facts before
+# acting. Nova sometimes emits that audit as plain text instead of inside
+# <thinking>, so drop those lines here too - they are working notes, not
+# something a customer should read.
+AUDIT_RE = re.compile(
+    r"^[ \t]*(description|stepsToReproduce|steps to reproduce|environment)[ \t]*:.*$",
+    re.IGNORECASE | re.MULTILINE)
+BLANKS_RE = re.compile(r"\n{3,}")
 
 
 def strip_thinking(text):
-    """Remove Nova's visible reasoning blocks from a reply."""
+    """Remove Nova's visible reasoning from a reply."""
     text = THINKING_RE.sub("", text)
     # An unclosed block (truncated stream): drop from the tag onward.
     idx = text.lower().find("<thinking>")
     if idx != -1:
         text = text[:idx]
-    return text.strip()
+    text = AUDIT_RE.sub("", text)
+    return BLANKS_RE.sub("\n\n", text).strip()
 
 
 def event_stream(response):
@@ -87,7 +96,7 @@ def invoke(rt, config, session_id, user_text, verbose=False):
             if buffer:
                 message = "".join(buffer)
                 texts.append(message)
-                visible = strip_thinking(message)
+                visible = strip_thinking(message) or message.strip() or message.strip()
                 if visible:
                     print(visible, flush=True)
                 buffer = []
